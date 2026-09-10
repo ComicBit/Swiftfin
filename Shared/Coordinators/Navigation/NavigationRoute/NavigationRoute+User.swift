@@ -20,6 +20,15 @@ extension NavigationRoute {
         }
     }
 
+    static func connectToServer(initialURL: URL, provider: String? = nil) -> NavigationRoute {
+        NavigationRoute(
+            id: "connectToServer-\(initialURL.absoluteString)-\(provider ?? "")",
+            style: .sheet
+        ) {
+            ConnectToServerView(initialURL: initialURL, provider: provider)
+        }
+    }
+
     static func quickConnect(client: JellyfinClient, action: @escaping (String) async -> Void) -> NavigationRoute {
         NavigationRoute(
             id: "quickConnectView",

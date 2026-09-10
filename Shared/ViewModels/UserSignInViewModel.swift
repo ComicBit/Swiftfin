@@ -45,6 +45,8 @@ final class UserSignInViewModel: ObservableObject {
         case getPublicData
         case signIn(username: String, password: String)
         case signInQuickConnect(secret: String)
+        case getPublicData
+        case signInNative(provider: String)
 
         case save(
             user: UserStateDataPair,
@@ -66,7 +68,7 @@ final class UserSignInViewModel: ObservableObject {
                 .none
             case .getPublicData:
                 .background(.gettingPublicData)
-            case .signIn, .signInQuickConnect:
+            case .signIn, .signInQuickConnect, .signInNative:
                 .loop(.signingIn)
             }
         }
@@ -93,6 +95,8 @@ final class UserSignInViewModel: ObservableObject {
     private(set) var publicUsers: [UserDto] = []
     @Published
     private(set) var serverDisclaimer: String? = nil
+    @Published
+    private(set) var nativeSSOProvider: String? = nil
 
     private let logger = Logger.swiftfin()
     private var cancellables = Set<AnyCancellable>()
@@ -110,6 +114,8 @@ final class UserSignInViewModel: ObservableObject {
         async let serverDisclaimer = try retrieveServerDisclaimer()
 
         self.isQuickConnectEnabled = try await isQuickConnectEnabled
+        nativeSSOProvider = await retrieveNativeSSOProvider()
+
         self.publicUsers = try await publicUsers
         self.serverDisclaimer = try await serverDisclaimer
     }
@@ -163,6 +169,35 @@ final class UserSignInViewModel: ObservableObject {
               let username = userData.name
         else {
             logger.error("Missing user data from network call")
+            throw ErrorMessage(L10n.unknownError)
+        }
+
+        if let existingUser = existingUser(id: id) {
+            events.send(.existingUser(((existingUser, accessToken), userData)))
+        } else {
+            let newUserState = UserState(
+                id: id,
+                serverID: server.id,
+                username: username
+            )
+
+            events.send(.connected(((newUserState, accessToken), userData)))
+        }
+    }
+
+    @Function(\Action.Cases.signInNative)
+    private func _signInNative(_ provider: String) async throws {
+        let response = try await NativeOIDCService.shared.authenticate(
+            server: server,
+            provider: provider
+        )
+
+        guard let accessToken = response.accessToken,
+              let userData = response.user,
+              let id = userData.id,
+              let username = userData.name
+        else {
+            logger.error("Missing user data from native SSO response")
             throw ErrorMessage(L10n.unknownError)
         }
 
@@ -291,5 +326,16 @@ final class UserSignInViewModel: ObservableObject {
 
         let isEnabled = try? JSONDecoder().decode(Bool.self, from: response.value)
         return isEnabled ?? false
+    }
+
+    private func retrieveNativeSSOProvider() async -> String? {
+        do {
+            let request = Request<[String]>(path: "sso/OID/native/providers")
+            let response = try await server.client.send(request)
+            return response.value.first(where: { $0.caseInsensitiveCompare("tsidp") == .orderedSame })
+                ?? response.value.first
+        } catch {
+            return nil
+        }
     }
 }

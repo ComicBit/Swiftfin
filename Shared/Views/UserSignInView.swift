@@ -46,8 +46,13 @@ struct UserSignInView: View {
 
     @StateObject
     private var viewModel: UserSignInViewModel
+    private let automaticNativeSSOProvider: String?
 
-    init(server: ServerState) {
+    init(
+        server: ServerState,
+        automaticNativeSSOProvider: String? = nil
+    ) {
+        self.automaticNativeSSOProvider = automaticNativeSSOProvider
         self._viewModel = StateObject(wrappedValue: UserSignInViewModel(server: server))
     }
 
@@ -68,8 +73,24 @@ struct UserSignInView: View {
                 evaluatedPolicyMap: .init(action: processEvaluatedPolicy)
             )
         case let .existingUser(existingUser):
-            self.existingUser = existingUser
-            self.isPresentingExistingUser = true
+            if automaticNativeSSOProvider != nil, let authenticationAction {
+                let userState = existingUser.state.state
+                viewModel.saveExisting(
+                    user: existingUser,
+                    replaceForAccessToken: true,
+                    authenticationAction: (
+                        authenticationAction,
+                        userState.accessPolicy,
+                        userState.accessPolicy.authenticateReason(
+                            user: userState
+                        )
+                    ),
+                    evaluatedPolicyMap: .init(action: processEvaluatedPolicy)
+                )
+            } else {
+                self.existingUser = existingUser
+                self.isPresentingExistingUser = true
+            }
         case let .saved(user):
             Task { @MainActor in
                 do {
@@ -226,6 +247,33 @@ struct UserSignInView: View {
             }
         }
 
+        #if os(iOS) || os(macOS)
+        if let nativeSSOProvider = viewModel.nativeSSOProvider {
+            Section {
+                Button {
+                    viewModel.signInNative(provider: nativeSSOProvider)
+                } label: {
+                    Label(
+                        L10n.signInWithTailscale,
+                        systemImage: "person.badge.key.fill"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .listRowInsets(.zero)
+                .listRowBackground(Color.clear)
+                .fontWeight(.semibold)
+                .backport
+                .buttonStyle(.glassProminent.shadow(false))
+                .tint(.jellyfinPurple)
+                #if os(iOS)
+                    .controlSize(.large)
+                    .listRowSeparator(.hidden)
+                #endif
+                    .disabled(viewModel.state == .signingIn)
+            }
+        }
+        #endif
+
         if let disclaimer = viewModel.serverDisclaimer {
             Section(L10n.disclaimer) {
                 disclaimerText(disclaimer)
@@ -338,6 +386,10 @@ struct UserSignInView: View {
             .onFirstAppear {
                 focusedTextField = .username
                 viewModel.getPublicData()
+
+                if let provider = automaticNativeSSOProvider {
+                    viewModel.signInNative(provider: provider)
+                }
             }
             .alert(
                 L10n.duplicateUser,
