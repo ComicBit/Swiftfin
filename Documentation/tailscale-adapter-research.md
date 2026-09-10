@@ -1,4 +1,8 @@
-# Tailscale discovery and Jellyfin bootstrap research
+# Tailscale adapter research: discovery and Jellyfin bootstrap
+
+This is the evidence behind Swiftfin's first OIDC adapter. The provider-agnostic
+architecture it produced is documented in [Native OIDC sign-in](oidc-sign-in.md);
+everything below is specific to Tailscale and its `tsidp` identity provider.
 
 **Status:** implementation complete for the selected bootstrap/native bridge path; the live bridge is deployed and smoke-tested.  
 **Evidence date:** 2026-09-09.  
@@ -32,14 +36,14 @@ The implementable security boundary is therefore:
 * Manual onboarding normalizes the entered URL, sends `GET /System/Info/Public`, requires a server name and ID, follows a server redirect when appropriate, and stores the resulting URL/server identity (`Shared/ViewModels/ConnectToServerViewModel.swift:56-112`).
 * Endpoint failover tests each stored URL by fetching public system information and rejects a response whose server ID does not match the stored server (`Shared/Services/ServerConnectionManager.swift:69-95,99-148`).
 * The client configuration sends a Swiftfin client/device identity and an optional Jellyfin `accessToken` (`Shared/Extensions/JellyfinAPI/JellyfinClient.swift:18-41`).
-* Username/password login calls the Jellyfin SDK's `signIn(username:password:)`, then requires `accessToken`, user data, user ID, and user name before storing the user (`Shared/ViewModels/UserSignInViewModel.swift:117-151`). Quick Connect login calls `signIn(quickConnectSecret:)` and consumes the same resulting access-token shape (`Shared/ViewModels/UserSignInViewModel.swift:154-179`).
+* Username/password login calls the Jellyfin SDK's `signIn(username:password:)`, then requires `accessToken`, user data, user ID, and user name before storing the user. Quick Connect login calls `signIn(quickConnectSecret:)` and consumes the same resulting access-token shape. Both share one event path with OIDC sign-in (`Shared/ViewModels/UserSignInViewModel.swift`).
 * Quick Connect UI displays the server-generated code and waits for the SDK's authenticated event (`Shared/Views/QuickConnectView.swift:12-75`).
 
-### Existing deep links are not onboarding links
+### Existing deep links were not onboarding links
 
-`DeepLink` accepts `swiftfin://` or `jellyfin://` URLs containing an existing `serverID`, `userID`, and item/library destination. It does **not** encode a server URL or a tailnet/`tsidp` endpoint (`Shared/Services/DeepLink.swift:11-33`). `UserSessionManager.handleOpenURL` looks up the server and user in local storage and reports missing-server/missing-user errors; it does not enroll a new server or exchange an arbitrary URL for credentials (`Shared/Services/UserSession/UserSessionManager.swift:145-177,216-223`).
+`DeepLink` accepts `swiftfin://` or `jellyfin://` URLs containing an existing `serverID`, `userID`, and item/library destination. It does **not** encode a server URL or a tailnet/`tsidp` endpoint (`Shared/Services/DeepLink.swift`). Before this feature, `UserSessionManager.handleOpenURL` only looked those IDs up in local storage and reported missing-server/missing-user errors.
 
-**Implication:** A QR code/deep link can be added as a future bootstrap transport, but the current deep-link format cannot bootstrap a first-time arbitrary server by itself.
+**Implication:** the deep-link format could not bootstrap a first-time arbitrary server, so `ServerBootstrapLink` was added as a separate transport that `handleOpenURL` checks first (`Shared/Services/ServerBootstrapLink.swift`, `Shared/Services/UserSession/UserSessionManager.swift`).
 
 ## Tailscale facts
 
@@ -119,7 +123,7 @@ Therefore:
 ### Facts
 
 * The current Swiftfin deep-link parser requires an existing server ID and user ID, and routes only to a media destination (`Shared/Services/DeepLink.swift:11-33`).
-* The current URL handler looks up those IDs in local storage and rejects missing server/user records (`Shared/Services/UserSession/UserSessionManager.swift:145-177,216-223`).
+* The URL handler resolves a bootstrap link first, and otherwise looks those IDs up in local storage and rejects missing server/user records (`Shared/Services/UserSession/UserSessionManager.swift`).
 * Tailscale user invites and machine-share links are owner-generated, expiring access artifacts. Tailscale says share links should be treated like passwords: [Sharing](https://tailscale.com/docs/features/sharing), [Invite any user](https://tailscale.com/docs/features/sharing/how-to/invite-any-user).
 
 ### Recommendation
@@ -187,7 +191,7 @@ The compatible Community SSO plugin source now contains an offline-built native 
 `tsidp` provider. The bridge deliberately reuses the plugin's existing OIDC validation, role gates, identity
 mapping, and Jellyfin session minting:
 
-1. `GET /sso/OID/native/providers` returns enabled OpenID provider names. Swiftfin selects `tsidp` when present.
+1. `GET /sso/OID/native/providers` returns enabled OpenID provider names. Swiftfin offers every returned provider, listing the ones it has an adapter for first.
 2. `GET /sso/OID/native/start/{provider}?state=<client-state>&code_challenge=<S256>` validates the bounded
    client inputs, creates a short-lived server transaction, and redirects to the configured OIDC provider.
 3. The current `tsidp` client callback remains `/sso/OID/redirect/{provider}`, so no additional redirect URI
@@ -202,9 +206,11 @@ mapping, and Jellyfin session minting:
 
 Swiftfin now accepts owner-issued `swiftfin://server?url=...&provider=...` or
 `jellyfin://connect?url=...&provider=...` bootstrap links, probes the supplied Jellyfin endpoint using its
-existing server identity checks, discovers the native provider, opens `ASWebAuthenticationSession`, verifies
-the fixed callback and state, and exchanges the one-time server state through the native endpoint. The
-native bridge uses S256 PKCE and does not require a Tailscale API credential in Swiftfin.
+existing server identity checks, discovers the native providers, opens `ASWebAuthenticationSession`, verifies
+the fixed callback and state, and exchanges the one-time server state through the native endpoint. None of
+those steps is Tailscale specific: `tsidp` is only the provider name this server advertises, and
+`OIDCProviderAdapter.tailscale` supplies its display name and symbol. The native bridge uses S256 PKCE and
+does not require a Tailscale API credential in Swiftfin.
 
 The package targets Jellyfin 12 / .NET 10 and passed an offline `dotnet build` with zero warnings and
 errors. The staged package was deployed into the existing
@@ -231,9 +237,9 @@ healthy, and the plugin manager reports Community SSO loaded.
 * [Swiftfin local discovery and manual connection](../Shared/ViewModels/ConnectToServerViewModel.swift#L56-L112) and [discovery loop](../Shared/ViewModels/ConnectToServerViewModel.swift#L175-L191)
 * [Swiftfin connection probing/server-ID check](../Shared/Services/ServerConnectionManager.swift#L69-L148)
 * [Swiftfin client/device/access-token configuration](../Shared/Extensions/JellyfinAPI/JellyfinClient.swift#L18-L41)
-* [Swiftfin username/password and Quick Connect login](../Shared/ViewModels/UserSignInViewModel.swift#L117-L179)
+* [Swiftfin sign-in paths](../Shared/ViewModels/UserSignInViewModel.swift) and [native OIDC service](../Shared/Services/OIDC/OIDCService.swift)
 * [Swiftfin Quick Connect UI](../Shared/Views/QuickConnectView.swift#L12-L75)
-* [Swiftfin deep-link parser](../Shared/Services/DeepLink.swift#L11-L33) and [stored-session-only URL handling](../Shared/Services/UserSession/UserSessionManager.swift#L145-L177)
+* [Swiftfin deep-link parser](../Shared/Services/DeepLink.swift) and [bootstrap/deep-link URL handling](../Shared/Services/UserSession/UserSessionManager.swift)
 * [Swiftfin local discovery limitations](../Documentation/common_issues.md#L70-L75)
 
 ### Official Tailscale sources
