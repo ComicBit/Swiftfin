@@ -33,11 +33,11 @@ struct ConnectToServerView: View {
     private var viewModel = ConnectToServerViewModel()
 
     private let initialURL: URL?
-    private let provider: String?
+    private let oidcProvider: OIDCProvider?
 
-    init(initialURL: URL? = nil, provider: String? = nil) {
+    init(initialURL: URL? = nil, oidcProvider: OIDCProvider? = nil) {
         self.initialURL = initialURL
-        self.provider = provider
+        self.oidcProvider = oidcProvider
         _url = State(initialValue: initialURL?.absoluteString ?? "")
     }
 
@@ -176,7 +176,7 @@ struct ConnectToServerView: View {
         if let connectedServer {
             UserSignInView(
                 server: connectedServer,
-                automaticNativeSSOProvider: provider
+                automaticOIDCProvider: oidcProvider
             )
         } else {
             ProgressView()

@@ -46,13 +46,13 @@ struct UserSignInView: View {
 
     @StateObject
     private var viewModel: UserSignInViewModel
-    private let automaticNativeSSOProvider: String?
+    private let automaticOIDCProvider: OIDCProvider?
 
     init(
         server: ServerState,
-        automaticNativeSSOProvider: String? = nil
+        automaticOIDCProvider: OIDCProvider? = nil
     ) {
-        self.automaticNativeSSOProvider = automaticNativeSSOProvider
+        self.automaticOIDCProvider = OIDCService.isSupported ? automaticOIDCProvider : nil
         self._viewModel = StateObject(wrappedValue: UserSignInViewModel(server: server))
     }
 
@@ -73,7 +73,7 @@ struct UserSignInView: View {
                 evaluatedPolicyMap: .init(action: processEvaluatedPolicy)
             )
         case let .existingUser(existingUser):
-            if automaticNativeSSOProvider != nil, let authenticationAction {
+            if automaticOIDCProvider != nil, let authenticationAction {
                 let userState = existingUser.state.state
                 viewModel.saveExisting(
                     user: existingUser,
@@ -247,32 +247,32 @@ struct UserSignInView: View {
             }
         }
 
-        #if os(iOS) || os(macOS)
-        if let nativeSSOProvider = viewModel.nativeSSOProvider {
+        if viewModel.oidcProviders.isNotEmpty {
             Section {
-                Button {
-                    viewModel.signInNative(provider: nativeSSOProvider)
-                } label: {
-                    Label(
-                        L10n.signInWithTailscale,
-                        systemImage: "person.badge.key.fill"
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-                .listRowInsets(.zero)
-                .listRowBackground(Color.clear)
-                .fontWeight(.semibold)
-                .backport
-                .buttonStyle(.glassProminent.shadow(false))
-                .tint(.jellyfinPurple)
-                #if os(iOS)
+                ForEach(viewModel.oidcProviders) { provider in
+                    Button {
+                        viewModel.signInOIDC(provider: provider)
+                    } label: {
+                        Label(
+                            L10n.signInWith(provider.displayTitle),
+                            systemImage: provider.systemImage
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                    .listRowInsets(.zero)
+                    .listRowBackground(Color.clear)
+                    .fontWeight(.semibold)
+                    .backport
+                    .buttonStyle(.glassProminent.shadow(false))
+                    .tint(.jellyfinPurple)
+                    #if os(iOS)
                     .controlSize(.large)
                     .listRowSeparator(.hidden)
-                #endif
+                    #endif
                     .disabled(viewModel.state == .signingIn)
+                }
             }
         }
-        #endif
 
         if let disclaimer = viewModel.serverDisclaimer {
             Section(L10n.disclaimer) {
@@ -387,8 +387,8 @@ struct UserSignInView: View {
                 focusedTextField = .username
                 viewModel.getPublicData()
 
-                if let provider = automaticNativeSSOProvider {
-                    viewModel.signInNative(provider: provider)
+                if let automaticOIDCProvider {
+                    viewModel.signInOIDC(provider: automaticOIDCProvider)
                 }
             }
             .alert(

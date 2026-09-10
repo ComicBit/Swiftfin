@@ -145,23 +145,12 @@ struct SelectUserView: View {
         }
     }
 
-    private func completeSignIn(_ user: UserState) {
-        Task { @MainActor in
-            do {
-                try await userSessionManager.signIn(userID: user.id)
-                UIDevice.feedback(.success)
-            } catch {
-                await viewModel.error(error)
-            }
-        }
-    }
-
     private func handleServerBootstrap(_ bootstrap: ServerBootstrapLink) {
         _ = userSessionManager.consumePendingServerBootstrap()
         router.route(
             to: .connectToServer(
                 initialURL: bootstrap.serverURL,
-                provider: bootstrap.provider
+                oidcProvider: bootstrap.oidcProvider
             )
         )
     }

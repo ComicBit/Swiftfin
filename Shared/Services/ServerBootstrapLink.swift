@@ -8,9 +8,12 @@
 
 import Foundation
 
+/// A one-time link that preseeds the connect flow with a server endpoint and,
+/// optionally, the OIDC provider to sign in with.
 struct ServerBootstrapLink: Equatable {
+
     let serverURL: URL
-    let provider: String?
+    let oidcProvider: OIDCProvider?
 
     init?(_ url: URL) {
         guard ["swiftfin", "jellyfin"].contains(url.scheme?.lowercased()),
@@ -24,13 +27,13 @@ struct ServerBootstrapLink: Equatable {
               serverURL.host != nil
         else { return nil }
 
-        if let provider = components?.queryItems?.first(where: { $0.name == "provider" })?.value,
-           !provider.isEmpty,
-           provider.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
+        if let providerName = components?.queryItems?.first(where: { $0.name == "provider" })?.value,
+           providerName.isNotEmpty,
+           providerName.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" })
         {
-            self.provider = provider
+            self.oidcProvider = OIDCProvider(name: providerName)
         } else {
-            self.provider = nil
+            self.oidcProvider = nil
         }
 
         self.serverURL = serverURL

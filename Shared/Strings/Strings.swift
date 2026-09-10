@@ -1522,8 +1522,10 @@ internal enum L10n {
   internal static func signInToServer(_ p1: UnsafePointer<CChar>) -> String {
     return L10n.tr("Localizable", "signInToServer", p1, fallback: "Sign in to %s")
   }
-  /// Sign in with Tailscale
-  internal static let signInWithTailscale = L10n.tr("Localizable", "signInWithTailscale", fallback: "Sign in with Tailscale")
+  /// Sign in with %s
+  internal static func signInWith(_ p1: UnsafePointer<CChar>) -> String {
+    return L10n.tr("Localizable", "signInWith", p1, fallback: "Sign in with %s")
+  }
   /// Sign out on background
   internal static let signoutBackground = L10n.tr("Localizable", "signoutBackground", fallback: "Sign out on background")
   /// Signs out the last user when Swiftfin has been in the background without media playback after some time.

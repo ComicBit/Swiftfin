@@ -20,12 +20,12 @@ extension NavigationRoute {
         }
     }
 
-    static func connectToServer(initialURL: URL, provider: String? = nil) -> NavigationRoute {
+    static func connectToServer(initialURL: URL, oidcProvider: OIDCProvider? = nil) -> NavigationRoute {
         NavigationRoute(
-            id: "connectToServer-\(initialURL.absoluteString)-\(provider ?? "")",
+            id: "connectToServer-\(initialURL.absoluteString)-\(oidcProvider?.name ?? "")",
             style: .sheet
         ) {
-            ConnectToServerView(initialURL: initialURL, provider: provider)
+            ConnectToServerView(initialURL: initialURL, oidcProvider: oidcProvider)
         }
     }
 
