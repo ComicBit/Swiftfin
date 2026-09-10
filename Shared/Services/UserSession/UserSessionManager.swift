@@ -54,6 +54,9 @@ final class UserSessionManager: ObservableObject {
     private(set) var currentSession: UserSession?
 
     @Published
+    private(set) var pendingServerBootstrap: ServerBootstrapLink?
+
+    @Published
     private(set) var pendingDeepLink: DeepLink?
 
     let routePublisher = PassthroughSubject<NavigationRoute, Never>()
@@ -146,6 +149,11 @@ final class UserSessionManager: ObservableObject {
         _ url: URL,
         authenticationAction: LocalUserAuthenticationAction
     ) async {
+        if let bootstrap = ServerBootstrapLink(url) {
+            pendingServerBootstrap = bootstrap
+            return
+        }
+
         guard let deepLink = DeepLink(url) else { return }
 
         do {
@@ -183,6 +191,15 @@ final class UserSessionManager: ObservableObject {
         }
 
         return pendingDeepLink
+    }
+
+    @MainActor
+    func consumePendingServerBootstrap() -> ServerBootstrapLink? {
+        defer {
+            pendingServerBootstrap = nil
+        }
+
+        return pendingServerBootstrap
     }
 
     @MainActor

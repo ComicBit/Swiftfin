@@ -26,9 +26,24 @@ struct ConnectToServerView: View {
 
     @State
     private var url: String = ""
+    @State
+    private var connectedServer: ServerState? = nil
 
     @StateObject
     private var viewModel = ConnectToServerViewModel()
+
+    private let initialURL: URL?
+    private let oidcProvider: OIDCProvider?
+
+    init(initialURL: URL? = nil, oidcProvider: OIDCProvider? = nil) {
+        self.initialURL = initialURL
+        self.oidcProvider = oidcProvider
+        _url = State(initialValue: initialURL?.absoluteString ?? "")
+    }
+
+    private var isAutomaticConnection: Bool {
+        initialURL != nil
+    }
 
     private let timer = Timer.publish(every: 12, on: .main, in: .common).autoconnect()
 
@@ -38,10 +53,23 @@ struct ConnectToServerView: View {
             UIDevice.feedback(.success)
             Notifications[.didConnectToServer].post(server)
 
-            router.dismiss()
+            if isAutomaticConnection {
+                connectedServer = server
+            } else {
+                router.dismiss()
+            }
         case let .duplicateServer(server):
-            UIDevice.feedback(.warning)
-            duplicateServer = server
+            if isAutomaticConnection {
+                if let existingServer = StoredValues[.Server.servers].first(where: { $0.id == server.id }) {
+                    viewModel.addConnection(serverState: server)
+                    connectedServer = existingServer
+                } else {
+                    duplicateServer = server
+                }
+            } else {
+                UIDevice.feedback(.warning)
+                duplicateServer = server
+            }
         }
     }
 
@@ -170,34 +198,57 @@ struct ConnectToServerView: View {
         #endif
     }
 
+    @ViewBuilder
+    private var automaticContentView: some View {
+        if let connectedServer {
+            UserSignInView(
+                server: connectedServer,
+                automaticOIDCProvider: oidcProvider
+            )
+        } else {
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
     // MARK: - Body
 
     var body: some View {
         Group {
-            contentView
-            #if os(iOS)
-            .navigationTitle(L10n.connect)
-            #endif
-            .topBarTrailing {
-                if viewModel.state == .connecting {
-                    ProgressView()
-                }
+            if isAutomaticConnection {
+                automaticContentView
+            } else {
+                contentView
+                    #if os(iOS)
+                    .navigationTitle(L10n.connect)
+                    #endif
+                    .topBarTrailing {
+                        if viewModel.state == .connecting {
+                            ProgressView()
+                        }
+                    }
             }
         }
         .interactiveDismissDisabled(viewModel.state == .connecting)
         .onFirstAppear {
-            isURLFocused = true
-            viewModel.searchForServers()
+            if let initialURL {
+                viewModel.connect(url: initialURL.absoluteString)
+            } else {
+                isURLFocused = true
+                viewModel.searchForServers()
+            }
         }
         .onReceive(timer) { _ in
-            guard viewModel.state != .connecting else { return }
+            guard !isAutomaticConnection, viewModel.state != .connecting else { return }
             viewModel.searchForServers()
         }
         .onReceive(viewModel.events, perform: onEvent)
         .onReceive(viewModel.$error) { error in
             guard error != nil else { return }
             UIDevice.feedback(.error)
-            isURLFocused = true
+            if !isAutomaticConnection {
+                isURLFocused = true
+            }
         }
         .sheet(item: $duplicateServer) { server in
             DuplicateServerConnectionView(server: server) {

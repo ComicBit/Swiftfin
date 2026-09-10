@@ -43,6 +43,7 @@ final class UserSignInViewModel: ObservableObject {
         case cancel
         case error(Error)
         case signIn(username: String, password: String)
+        case signInOIDC(provider: OIDCProvider)
         case signInQuickConnect(secret: String)
         case getPublicData
 
@@ -66,7 +67,7 @@ final class UserSignInViewModel: ObservableObject {
                 .none
             case .getPublicData:
                 .background(.gettingPublicData)
-            case .signIn, .signInQuickConnect:
+            case .signIn, .signInOIDC, .signInQuickConnect:
                 .loop(.signingIn)
             }
         }
@@ -93,6 +94,8 @@ final class UserSignInViewModel: ObservableObject {
     private(set) var publicUsers: [UserDto] = []
     @Published
     private(set) var serverDisclaimer: String? = nil
+    @Published
+    private(set) var oidcProviders: [OIDCProvider] = []
 
     private let logger = Logger.swiftfin()
     private var cancellables = Set<AnyCancellable>()
@@ -106,10 +109,12 @@ final class UserSignInViewModel: ObservableObject {
     @Function(\Action.Cases.getPublicData)
     private func _getPublicData() async throws {
         async let isQuickConnectEnabled = try retrieveIsQuickConnectEnabled()
+        async let oidcProviders = retrieveOIDCProviders()
         async let publicUsers = try retrievePublicUsers()
         async let serverDisclaimer = try retrieveServerDisclaimer()
 
         self.isQuickConnectEnabled = try await isQuickConnectEnabled
+        self.oidcProviders = await oidcProviders
         self.publicUsers = try await publicUsers
         self.serverDisclaimer = try await serverDisclaimer
     }
@@ -129,26 +134,17 @@ final class UserSignInViewModel: ObservableObject {
 
         let response = try await server.client.signIn(username: username, password: password)
 
-        guard let accessToken = response.accessToken,
-              let userData = response.user,
-              let id = userData.id,
-              let username = userData.name
-        else {
-            logger.critical("Missing user data from network call")
-            throw ErrorMessage(L10n.unknownError)
-        }
+        try sendSignInEvent(for: response)
+    }
 
-        if let existingUser = existingUser(id: id) {
-            events.send(.existingUser(((existingUser, accessToken), userData)))
-        } else {
-            let newUserState = UserState(
-                id: id,
-                serverID: server.id,
-                username: username
-            )
+    @Function(\Action.Cases.signInOIDC)
+    private func _signInOIDC(_ provider: OIDCProvider) async throws {
+        let response = try await OIDCService.shared.authenticate(
+            server: server,
+            provider: provider
+        )
 
-            events.send(.connected(((newUserState, accessToken), userData)))
-        }
+        try sendSignInEvent(for: response)
     }
 
     @Function(\Action.Cases.signInQuickConnect)
@@ -157,12 +153,18 @@ final class UserSignInViewModel: ObservableObject {
     ) async throws {
         let response = try await server.client.signIn(quickConnectSecret: secret)
 
+        try sendSignInEvent(for: response)
+    }
+
+    /// Sends the event for a completed authentication, distinguishing a user
+    /// already stored on this device.
+    private func sendSignInEvent(for response: AuthenticationResult) throws {
         guard let accessToken = response.accessToken,
               let userData = response.user,
               let id = userData.id,
               let username = userData.name
         else {
-            logger.error("Missing user data from network call")
+            logger.error("Missing user data from authentication response")
             throw ErrorMessage(L10n.unknownError)
         }
 
@@ -291,5 +293,9 @@ final class UserSignInViewModel: ObservableObject {
 
         let isEnabled = try? JSONDecoder().decode(Bool.self, from: response.value)
         return isEnabled ?? false
+    }
+
+    private func retrieveOIDCProviders() async -> [OIDCProvider] {
+        await OIDCService.shared.providers(for: server)
     }
 }

@@ -48,8 +48,13 @@ struct UserSignInView: View {
 
     @StateObject
     private var viewModel: UserSignInViewModel
+    private let automaticOIDCProvider: OIDCProvider?
 
-    init(server: ServerState) {
+    init(
+        server: ServerState,
+        automaticOIDCProvider: OIDCProvider? = nil
+    ) {
+        self.automaticOIDCProvider = OIDCService.isSupported ? automaticOIDCProvider : nil
         self._viewModel = StateObject(wrappedValue: UserSignInViewModel(server: server))
     }
 
@@ -70,8 +75,24 @@ struct UserSignInView: View {
                 evaluatedPolicyMap: .init(action: processEvaluatedPolicy)
             )
         case let .existingUser(existingUser):
-            self.existingUser = existingUser
-            self.isPresentingExistingUser = true
+            if automaticOIDCProvider != nil, let authenticationAction {
+                let userState = existingUser.state.state
+                viewModel.saveExisting(
+                    user: existingUser,
+                    replaceForAccessToken: true,
+                    authenticationAction: (
+                        authenticationAction,
+                        userState.accessPolicy,
+                        userState.accessPolicy.authenticateReason(
+                            user: userState
+                        )
+                    ),
+                    evaluatedPolicyMap: .init(action: processEvaluatedPolicy)
+                )
+            } else {
+                self.existingUser = existingUser
+                self.isPresentingExistingUser = true
+            }
         case let .saved(user):
             Task { @MainActor in
                 do {
@@ -232,6 +253,33 @@ struct UserSignInView: View {
             }
         }
 
+        if viewModel.oidcProviders.isNotEmpty {
+            Section {
+                ForEach(viewModel.oidcProviders) { provider in
+                    Button {
+                        viewModel.signInOIDC(provider: provider)
+                    } label: {
+                        Label(
+                            L10n.signInWith(provider.displayTitle),
+                            systemImage: provider.systemImage
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                    .listRowInsets(.zero)
+                    .listRowBackground(Color.clear)
+                    .fontWeight(.semibold)
+                    .backport
+                    .buttonStyle(.glassProminent.shadow(false))
+                    .tint(.jellyfinPurple)
+                    #if os(iOS)
+                    .controlSize(.large)
+                    .listRowSeparator(.hidden)
+                    #endif
+                    .disabled(viewModel.state == .signingIn)
+                }
+            }
+        }
+
         if let disclaimer = viewModel.serverDisclaimer {
             Section(L10n.disclaimer) {
                 disclaimerText(disclaimer)
@@ -344,6 +392,10 @@ struct UserSignInView: View {
             .onFirstAppear {
                 focusedTextField = .username
                 viewModel.getPublicData()
+
+                if let automaticOIDCProvider {
+                    viewModel.signInOIDC(provider: automaticOIDCProvider)
+                }
             }
             .alert(
                 L10n.duplicateUser,

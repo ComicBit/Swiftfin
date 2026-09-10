@@ -156,6 +156,16 @@ struct SelectUserView: View {
         }
     }
 
+    private func handleServerBootstrap(_ bootstrap: ServerBootstrapLink) {
+        _ = userSessionManager.consumePendingServerBootstrap()
+        router.route(
+            to: .connectToServer(
+                initialURL: bootstrap.serverURL,
+                oidcProvider: bootstrap.oidcProvider
+            )
+        )
+    }
+
     @ViewBuilder
     private var splashScreenBackground: some View {
         if selectUserUseSplashscreen, splashScreenImageSources.isNotEmpty {
@@ -404,6 +414,10 @@ struct SelectUserView: View {
                 completeSignIn(user)
             }
         }
+        .onReceive(
+            userSessionManager.$pendingServerBootstrap.compactMap(\.self),
+            perform: handleServerBootstrap
+        )
         .onNotification(.didConnectToServer) { server in
             viewModel.background.getServers()
             serverSelection = .server(id: server.id)
